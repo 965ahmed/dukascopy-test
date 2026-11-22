@@ -1,0 +1,2 @@
+# dukascopy-test
+gold price
