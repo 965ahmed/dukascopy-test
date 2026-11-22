@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dukascopy Gold Tester</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; background: #101722; color: #e8edf5; font-family: Arial, sans-serif; }
+.app { max-width: 850px; margin: auto; padding: 16px; }
+h1 { font-size: 23px; color: #f3c969; text-align: center; }
+.subtitle { text-align: center; color: #8fa2b8; margin-bottom: 20px; }
+.card { background: #1a2533; border: 1px solid #304052; border-radius: 14px; padding: 15px; margin-bottom: 14px; }
+label { display: block; margin-bottom: 7px; color: #b9c6d8; font-size: 13px; }
+input, button { width: 100%; padding: 13px; border-radius: 10px; border: 1px solid #35465a; background: #111b27; color: white; font-size: 15px; }
+button { border: none; background: #e5b94e; color: #17202a; font-weight: bold; margin-top: 12px; cursor: pointer; }
+button:disabled { opacity: .5; }
+button.secondary { background: #243345; color: #f3c969; border: 1px solid #304052; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat { text-align: center; background: #111b27; border-radius: 10px; padding: 13px 5px; }
+.stat strong { display: block; font-size: 22px; color: #f3c969; margin-top: 6px; }
+.stat span { color: #94a5b8; font-size: 12px; }
+.status { text-align: center; color: #94a5b8; font-size: 13px; margin: 12px 0; word-break: break-word; }
+.table-wrap { overflow-x: auto; max-height: 65vh; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; direction: ltr; }
+th, td { padding: 9px 7px; text-align: center; border-bottom: 1px solid #2c3a4b; white-space: nowrap; }
+th { position: sticky; top: 0; background: #243345; color: #f3c969; }
+tr:hover { background: #243345; }
+.green { color: #65d6a2; }
+.red { color: #ff8585; }
+pre { direction: ltr; text-align: left; white-space: pre-wrap; word-break: break-word; background: #111b27; border-radius: 10px; padding: 12px; font-size: 11px; max-height: 350px; overflow: auto; }
+input#from, input#to { direction: ltr; text-align: center; font-variant-numeric: tabular-nums; }
+@media(max-width:500px) { .app { padding: 10px; } h1 { font-size: 20px; } table { font-size: 11px; } }
+</style>
+</head>
+<body>
+<div class="app">
+<h1>🥇 Dukascopy Gold Tester</h1>
+<div class="subtitle">XAU/USD · 15 Minutes · Historical Data (بيانات حقيقية)</div>
+<div class="card">
+<div class="row">
+<div><label>من تاريخ (YYYY-MM-DD)</label><input type="text" id="from" value="2026-11-18" placeholder="YYYY-MM-DD" inputmode="numeric" maxlength="10" dir="ltr"></div>
+<div><label>إلى تاريخ (غير شامل)</label><input type="text" id="to" value="2026-11-21" placeholder="YYYY-MM-DD" inputmode="numeric" maxlength="10" dir="ltr"></div>
+</div>
+<button id="fetchBtn" onclick="fetchData()">تحميل بيانات الذهب</button>
+<div class="row">
+<div><button id="healthBtn" class="secondary" onclick="checkHealth()">🔌 فحص الاتصال بالسيرفر</button></div>
+<div><button id="csvBtn" class="secondary" onclick="downloadCSV()" disabled>⬇ تحميل CSV</button></div>
+</div>
+<div class="status" id="status">جاهز لجلب البيانات الحقيقية</div>
+</div>
+<div class="card">
+<div class="row">
+<div class="stat"><span>عدد الشموع</span><strong id="count">0</strong></div>
+<div class="stat"><span>آخر سعر إغلاق</span><strong id="lastClose">--</strong></div>
+</div>
+<div class="row" style="margin-top:10px">
+<div class="stat"><span>أعلى سعر</span><strong id="maxHigh">--</strong></div>
+<div class="stat"><span>أدنى سعر</span><strong id="minLow">--</strong></div>
+</div>
+</div>
+<div class="card">
+<h3>📊 بيانات الشموع M15</h3>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Time (UTC)</th><th>Open</th><th>High</th><th>Low</th><th>Close</th></tr></thead>
+<tbody id="tbody"></tbody>
+</table>
+</div>
+</div>
+<div class="card">
+<h3>🔍 معلومات التشخيص</h3>
+<pre id="diag">لم يتم الجلب بعد.</pre>
+</div>
+<div class="card">
+<h3>JSON Raw Data</h3>
+<pre id="raw">لا توجد بيانات بعد</pre>
+</div>
+</div>
+<script>
+// عنوان API: فارغ = نفس السيرفر (same origin). لو استضفت الواجهة في مكان
+// آخر، ضع الرابط الكامل هنا، مثال: "https://dukascopy-gold-xxxx.onrender.com"
+const API_BASE_URL = "";
+
+let lastData = [];
+
+// قناع إدخال التاريخ: أرقام فقط بصيغة YYYY-MM-DD
+function maskDateInput(el) {
+  el.addEventListener('input', () => {
+    const digits = el.value.replace(/\D/g, '').slice(0, 8);
+    let out = digits;
+    if (digits.length > 4) out = digits.slice(0, 4) + '-' + digits.slice(4);
+    if (digits.length > 6) out = digits.slice(0, 4) + '-' + digits.slice(4, 6) + '-' + digits.slice(6);
+    el.value = out;
+  });
+}
+maskDateInput(document.getElementById('from'));
+maskDateInput(document.getElementById('to'));
+
+// تحقق صارم من صيغة التاريخ (يرفض 2026-13-40 وأي صيغة غير YYYY-MM-DD)
+function validDateStr(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(s + 'T00:00:00Z');
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
+// تحويل timestamp إلى ميلي ثانية مع كشف الوحدة (ثوانٍ أم ميلي ثانية).
+function normalizeTimestamp(ts) {
+  if (typeof ts === 'number' && Number.isFinite(ts)) {
+    if (ts < 1e9) throw new Error('قيمة timestamp غير منطقية: ' + ts);
+    if (ts < 1e12) return { ms: Math.round(ts * 1000), unit: 'seconds' };
+    return { ms: Math.round(ts), unit: 'milliseconds' };
+  }
+  if (typeof ts === 'string') {
+    const s = ts.trim();
+    if (/^-?\d+(\.\d+)?$/.test(s)) return normalizeTimestamp(Number(s));
+    const p = Date.parse(s);
+    if (!Number.isFinite(p)) throw new Error('صيغة التاريخ غير معروفة: ' + ts);
+    return { ms: p, unit: 'iso-string' };
+  }
+  throw new Error('صيغة timestamp غير معروفة');
+}
+
+function setDiag(lines) {
+  document.getElementById('diag').textContent = lines.join('\n');
+}
+
+function render(data, result, meta) {
+  lastData = data;
+  document.getElementById('count').textContent = data.length;
+  if (!data.length) return;
+  const highs = data.map(x => Number(x.high)).filter(Number.isFinite);
+  const lows = data.map(x => Number(x.low)).filter(Number.isFinite);
+  document.getElementById('lastClose').textContent = Number(data[data.length - 1].close).toFixed(2);
+  document.getElementById('maxHigh').textContent = Math.max(...highs).toFixed(2);
+  document.getElementById('minLow').textContent = Math.min(...lows).toFixed(2);
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  data.slice().reverse().forEach(candle => {
+    const dateText = new Date(candle.timestamp).toLocaleString('en-GB', { timeZone: 'UTC', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const direction = Number(candle.close) >= Number(candle.open) ? 'green' : 'red';
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + dateText + '</td><td>' + Number(candle.open).toFixed(2) + '</td><td>' + Number(candle.high).toFixed(2) + '</td><td>' + Number(candle.low).toFixed(2) + '</td><td class="' + direction + '">' + Number(candle.close).toFixed(2) + '</td>';
+    tbody.appendChild(tr);
+  });
+  document.getElementById('raw').textContent = JSON.stringify(result, null, 2);
+  document.getElementById('csvBtn').disabled = false;
+  setDiag([
+    'server: ' + (meta.base || '(same origin)'),
+    'requested: ' + meta.from + ' -> ' + meta.to + ' (to exclusive)',
+    'received candles: ' + data.length,
+    'first candle (UTC): ' + new Date(data[0].timestamp).toISOString(),
+    'last candle (UTC): ' + new Date(data[data.length - 1].timestamp).toISOString(),
+    'timestamp unit from server: ' + meta.unit,
+    'M15 alignment: ' + (meta.aligned ? 'OK - all candles on 15-minute boundaries' : 'WARNING - some candles off 15-minute grid'),
+    'source: ' + (result.cached ? 'server cache' : 'Dukascopy live')
+  ]);
+}
+
+async function checkHealth() {
+  const status = document.getElementById('status');
+  const base = API_BASE_URL.replace(/\/+$/, '');
+  status.textContent = '🔌 جاري فحص الاتصال بالسيرفر...';
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 20000);
+    const r = await fetch(base + '/api/health', { signal: ctrl.signal });
+    clearTimeout(t);
+    const j = await r.json();
+    status.textContent = (r.ok && j.ok)
+      ? '✅ السيرفر يعمل | وقت السيرفر: ' + j.time
+      : '❌ السيرفر ردّ خطأ (HTTP ' + r.status + ')';
+  } catch (e) {
+    status.textContent = e.name === 'AbortError'
+      ? '❌ انتهت مهلة فحص السيرفر — انتظر وحاول مجددًا'
+      : '❌ تعذّر الوصول إلى السيرفر — تأكد أنه يعمل';
+  }
+}
+
+async function fetchData() {
+  const from = document.getElementById('from').value;
+  const to = document.getElementById('to').value;
+  if (!validDateStr(from) || !validDateStr(to) || from >= to) { alert('يرجى إدخال تاريخ صحيح بصيغة YYYY-MM-DD (مثال: 2026-11-18)'); return; }
+  const btn = document.getElementById('fetchBtn');
+  const status = document.getElementById('status');
+  const base = API_BASE_URL.replace(/\/+$/, '');
+  btn.disabled = true;
+  status.textContent = '⏳ جاري جلب البيانات الحقيقية من Dukascopy...';
+  lastData = [];
+  document.getElementById('tbody').innerHTML = '';
+  document.getElementById('raw').textContent = 'جاري التحميل...';
+  document.getElementById('count').textContent = '0';
+  document.getElementById('lastClose').textContent = '--';
+  document.getElementById('maxHigh').textContent = '--';
+  document.getElementById('minLow').textContent = '--';
+  document.getElementById('csvBtn').disabled = true;
+  setDiag(['fetching: ' + (base || '(same origin)') + '/api/gold?from=' + from + '&to=' + to]);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 180000);
+  try {
+    const url = base + `/api/gold?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    let response;
+    try {
+      response = await fetch(url, { signal: ctrl.signal });
+    } catch (netErr) {
+      if (netErr.name === 'AbortError') throw new Error('انتهت المهلة (3 دقائق) — حاول مجددًا');
+      throw new Error('تعذّر الاتصال بالسيرفر (Failed to fetch) — تأكد أنه يعمل');
+    }
+    let result;
+    try {
+      result = await response.json();
+    } catch (parseErr) {
+      throw new Error('السيرفر ردّ بيانات غير صالحة (HTTP ' + response.status + ')');
+    }
+    if (!response.ok || !result.success) throw new Error(result.error || ('خطأ من السيرفر (HTTP ' + response.status + ')'));
+    if (!Array.isArray(result.data) || result.data.length === 0) {
+      throw new Error('لم يعثر Dukascopy على شموع في هذه الفترة — جرّب فترة أخرى (السوق مغلق نهاية الأسبوع والعطل)');
+    }
+    let detectedUnit = 'milliseconds';
+    const seenUnits = new Set();
+    const data = result.data.map((c, i) => {
+      const n = normalizeTimestamp(c.timestamp);
+      seenUnits.add(n.unit);
+      for (const k of ['open', 'high', 'low', 'close']) {
+        if (!Number.isFinite(Number(c[k]))) throw new Error('شمعة رقم ' + i + ' تحتوي سعرًا غير رقمي في حقل ' + k);
+      }
+      return { timestamp: n.ms, open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: c.volume !== undefined ? Number(c.volume) : undefined };
+    });
+    detectedUnit = seenUnits.size === 1 ? [...seenUnits][0] : 'mixed(' + [...seenUnits].join(',') + ')';
+    data.sort((a, b) => a.timestamp - b.timestamp);
+    const firstTime = data[0].timestamp;
+    const lastTime = data[data.length - 1].timestamp;
+    const requestedStart = Date.parse(from + 'T00:00:00Z');
+    const requestedEnd = Date.parse(to + 'T00:00:00Z');
+    if (firstTime < requestedStart || firstTime >= requestedEnd || lastTime < requestedStart || lastTime >= requestedEnd) {
+      throw new Error('التواريخ المستلمة لا تطابق الفترة المطلوبة. أول شمعة: ' + new Date(firstTime).toISOString() + '، آخر شمعة: ' + new Date(lastTime).toISOString());
+    }
+    const aligned = data.every(c => c.timestamp % 900000 === 0);
+    render(data, result, { base, from, to, unit: detectedUnit, aligned });
+    status.textContent = '✅ بيانات حقيقية | ' + data.length + ' شمعة | من ' + new Date(firstTime).toISOString() + ' إلى ' + new Date(lastTime).toISOString();
+  } catch (error) {
+    status.textContent = '❌ ' + error.message;
+    document.getElementById('raw').textContent = error.stack || error.message;
+    setDiag(['ERROR: ' + error.message, 'no prices displayed - no fake data']);
+  } finally {
+    clearTimeout(timer);
+    btn.disabled = false;
+  }
+}
+
+function downloadCSV() {
+  // يُصدّر البيانات الحقيقية المستلمة فقط — لا شيء غيرها
+  if (!lastData.length) return;
+  const rows = ['timestamp_utc,open,high,low,close,volume'];
+  lastData.forEach(c => rows.push([new Date(c.timestamp).toISOString(), c.open, c.high, c.low, c.close, c.volume ?? ''].join(',')));
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'xauusd-m15-' + document.getElementById('from').value + '_' + document.getElementById('to').value + '.csv';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+</script>
+</body>
+</html>
